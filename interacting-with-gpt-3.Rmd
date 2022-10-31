@@ -1,0 +1,97 @@
+---
+title: "OpenAI API in R"
+output: html_notebook
+---
+## Sample notebook
+
+This R Markdown notebook shows how you can interface with the [OpenAI API](https://beta.openai.com/docs/api-reference/introduction).
+
+### Libraries
+```{r}
+pacman::p_load(tidyverse, ggplot2, httr)
+```
+
+### Variables for the OpenAI API
+
+See the list of possible model URLs to query from [here](https://beta.openai.com/docs/api-reference/models/list).
+
+```{r}
+# Change this link if you want to use another model (see above)
+api_url <- "https://api.openai.com/v1/engines/davinci/completions"
+
+# This is the secret API key from your OpenAI API
+apikey <- "sk-*"
+
+# Your prompt is what the mdoel sees to continue
+prompt <- "This is a test"
+
+# Tokens decides how large the output is allowed to be (higher = more time)
+tokens <- 5
+
+# Generate the completion
+output <- POST(api_url, body = list(prompt = prompt, max_tokens = tokens), add_headers(Authorization = paste("Bearer", apikey)), encode = "json")
+```
+
+### Output
+
+```{r}
+content(output)$choices[[1]]$text
+# Example output: [1] " of the ship to see"
+```
+
+## Example use
+
+Here, we use the model to generate endings to Danish news article titles' first 5 letters.
+
+```{r}
+# Use the Sentida package to analyze sentiment of outputs
+pacman::p_load(devtools)
+devtools::install_github("Guscode/Sentida")
+library(Sentida)
+
+# Dataset generation
+df <- tibble(
+  title = c(
+    "Ukraine om gaslæk i Østersøen:",
+    "Næsten 100 procent i flere",
+    "Russere flygter i tusindvis: Betaler",
+    "Verdenspremiere på Rigshospitalet: Ny behandling",
+    "Irans fodboldlandshold fik mundkurv på"
+  )
+)
+
+tokens <- 15
+
+# Run the API on the titles
+df_gpt <- df %>%
+  mutate(
+    output = map(title, function(x){
+      POST(api_url, body = list(prompt = title, max_tokens = tokens), add_headers(Authorization = paste("Bearer", apikey)), encode = "json")
+    }),
+    data = map(output, content, as="text")
+  ) %>% 
+  mutate(
+    text = as.character(map(data, function(x){jsonlite::fromJSON(x)$choices[[1]][1]})),
+    new_title = paste0(title, text),
+    sentiment = as.numeric(map(new_title, sentida)),
+  )
+```
+
+### Inspect the results
+```{r}
+df_gpt %>% 
+  select(sentiment, text, everything())
+
+df_gpt %>%
+  mutate(
+    new_title_trunc = str_trunc(paste0(title, text), 30)
+  ) %>% 
+  ggplot() +
+  aes(y = new_title_trunc, x = sentiment, fill=sentiment) +
+  geom_col() +
+  theme_minimal() +
+  theme(legend.position="none") +
+  labs(title="Sentiment of titles finished with GPT-3 davinci")
+```
+
+
